@@ -1,5 +1,7 @@
+from math import dist
 import tensorflow as tf
 import glob
+import os
 import numpy as np
 
 
@@ -109,13 +111,24 @@ def make_lines(x, y, resolution):
     return filled_x, filled_y
 
 
-def interpolate_simulations(simulation_refs, distance=0.01):
+def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset=0):
     for simulation in simulation_refs:
+        print("Working on {}".format(simulation))
         dat_files = glob.glob("{}/*".format(simulation))
         number_of_points = len(dat_files)
+        try:
+            os.mkdir("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}".format(
+                simulation_refs.index(simulation), x_offset, y_offset, distance
+            ))
+        except OSError:
+            print("Directory already exists")
         for i in range(number_of_points):
             x, y = read_file("{}/boundaries_{}.dat".format(simulation, i))
             x, y = make_lines(x, y, distance)
+            data = np.array([x + x_offset, y + y_offset])
+            np.save("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}".format(
+                simulation_refs.index(simulation), x_offset, y_offset, distance, i
+            ), data)
     return None
 
 
@@ -124,7 +137,8 @@ def main():
     valid_data = verify_data(raw_simulations)
     # Interpolate simulation datapoints
     distance_in_interpolation = 0.001
-
+    interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
+    
     # Transform interpolated datapoints to images
     image_size = 128
 
