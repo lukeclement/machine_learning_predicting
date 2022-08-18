@@ -3,6 +3,47 @@ import tensorflow as tf
 import glob
 import os
 import numpy as np
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+
+def main():
+    raw_simulations = glob.glob("Simulations/*")
+    number_of_simulations = len(raw_simulations)
+    valid_data = verify_data(raw_simulations)
+    # Interpolate simulation datapoints
+    distance_in_interpolation = 0.001
+    # interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
+
+    # Dataset creation
+    image_size = 128
+    input_frames = 4
+    timestep = 5
+
+    maximum_sequence_number = 10  # How far in the sequence to look for training
+    frames_in_sequence = 2  # Number of frames in the answer sequence
+    # This number must be greater than 1
+    # If this number is 2, then the answer sequence is just the next frame and the last frame in the sequence
+
+    excluded_simulations = []
+    number_of_sequences = get_sequence_number(number_of_simulations, distance_in_interpolation, input_frames, timestep, maximum_sequence_number, excluded_simulations)
+
+    training_questions = np.zeros((number_of_sequences, input_frames, image_size, image_size, 1))
+    training_answers = np.zeros((number_of_sequences, frames_in_sequence, image_size, image_size, 1))
+
+    test_frame = transform_data_to_image("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/0.npy", image_size)
+
+    plt.imshow(test_frame)
+    plt.show()
+    # Make neural network
+
+    # Train network
+
+    # Look at network performance
+
+    # Extract results from network
+
+    return 0
 
 
 def verify_data(simulation_refs):
@@ -122,44 +163,47 @@ def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset
             ))
         except OSError:
             print("Directory already exists")
-        for i in range(number_of_points):
+        bar = tqdm(total=number_of_points)
+        for i in range(3, number_of_points):
             x, y = read_file("{}/boundaries_{}.dat".format(simulation, i))
             x, y = make_lines(x, y, distance)
             data = np.array([x + x_offset, y + y_offset])
             np.save("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}".format(
-                simulation_refs.index(simulation), x_offset, y_offset, distance, i
+                simulation_refs.index(simulation), x_offset, y_offset, distance, i-3
             ), data)
+            bar.update(1)
+        bar.close()
     return None
 
 
-def main():
-    raw_simulations = glob.glob("Simulations/*")
-    valid_data = verify_data(raw_simulations)
-    # Interpolate simulation datapoints
-    distance_in_interpolation = 0.001
-    interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
-    
-    # Transform interpolated datapoints to images
-    image_size = 128
+def get_sequence_number(number_of_simulations, distance_in_interpolation, input_frames, timestep, maximum_sequence_number, excluded_simulations):
+    number_of_sequences = 0
+    for simulation_index in range(number_of_simulations):
+        if simulation_index not in excluded_simulations:
+            missing_data = False
+            data_index = (input_frames + maximum_sequence_number - 1) * timestep
+            while not missing_data:
+                try:
+                    data = np.load("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}".format(
+                        simulation_index, 0, 0, distance_in_interpolation, data_index
+                        ))
+                    number_of_sequences += 1
+                except IOError:
+                    missing_data = True
+                data_index += 1
+    return number_of_sequences
 
-    # Make dataset object out of images
-    number_of_input_frames = 4
-    timestep = 1
-    
-    maximum_sequence_number = 10  # How far in the sequence to look for training
-    number_of_frames_in_sequence = 2  # Number of frames in the answer sequence
-    # This number must be greater than 1
-    # If this number is 2, then the answer sequence is just the next frame and the last frame in the sequence
 
-    # Make neural network
-
-    # Train network
-    
-    # Look at network performance
-
-    # Extract results from network
-
-    return 0
+def transform_data_to_image(file_name, image_size, modifier=15):
+    x, y = np.load(file_name)
+    h, x_edge, y_edge = np.histogram2d(
+        x, y,
+        range=[[-1, 1], [-1, 1]], bins=(image_size, image_size)
+    )
+    output_array = np.zeros((image_size, image_size, 1))
+    h = np.tanh(h/modifier)
+    output_array[:, :, 0] = h.T
+    return output_array
 
 
 if __name__ == "__main__":
