@@ -24,22 +24,32 @@ def main():
     maximum_sequence_number = 10  # How far in the sequence to look for training
     frames_in_sequence = 2  # Number of frames in the answer sequence
     # This number must be greater than 1
-    # If this number is 2, then the answer sequence is just the next frame and the last frame in the sequence
+    # If this number is 2,
+    # then the answer sequence is just the next frame and the last frame in the sequence
 
     excluded_simulations = []
-    number_of_sequences = get_sequence_number(number_of_simulations, distance_in_interpolation, input_frames, timestep, maximum_sequence_number, excluded_simulations)
+    number_of_sequences = get_sequence_number(number_of_simulations, distance_in_interpolation,
+                                              input_frames, timestep, maximum_sequence_number,
+                                              excluded_simulations)
 
-    training_questions = np.zeros((number_of_sequences, input_frames, image_size, image_size, 1))
-    training_answers = np.zeros((number_of_sequences, frames_in_sequence, image_size, image_size, 1))
-    image_length = len(glob.glob("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/*.npy"))
+    training_questions = np.zeros((
+        number_of_sequences, input_frames, image_size, image_size, 1
+    ))
+    training_answers = np.zeros((
+        number_of_sequences, frames_in_sequence, image_size, image_size, 1
+    ))
+    image_length = len(glob.glob("Interpolated_simulations/sim_10_x-0_y-0_d-0.001/*.npy"))
 
     images = []
     for i in range(image_length):
-        images.append(transform_data_to_image("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/{}.npy".format(i), image_size))
+        images.append(transform_data_to_image(
+            "Interpolated_simulations/sim_10_x-0_y-0_d-0.001/{}.npy".format(i), image_size
+        ))
     imageio.mimsave("test.gif", images)
 
-
-    test_frame = transform_data_to_image("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/0.npy", image_size)
+    test_frame = transform_data_to_image(
+        "Interpolated_simulations/sim_0_x-0_y-0_d-0.001/0.npy", image_size
+    )
 
     plt.imshow(test_frame)
     plt.show()
@@ -171,7 +181,7 @@ def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset
             ))
         except OSError:
             print("Directory already exists")
-        bar = tqdm(total=number_of_points)
+        bar = tqdm(total=number_of_points-3)
         for i in range(3, number_of_points):
             x, y = read_file("{}/boundaries_{}.dat".format(simulation, i))
             x, y = make_lines(x, y, distance)
@@ -184,7 +194,8 @@ def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset
     return None
 
 
-def get_sequence_number(number_of_simulations, distance_in_interpolation, input_frames, timestep, maximum_sequence_number, excluded_simulations):
+def get_sequence_number(number_of_simulations, distance_in_interpolation, input_frames,
+                        timestep, maximum_sequence_number, excluded_simulations):
     number_of_sequences = 0
     for simulation_index in range(number_of_simulations):
         if simulation_index not in excluded_simulations:
@@ -198,6 +209,7 @@ def get_sequence_number(number_of_simulations, distance_in_interpolation, input_
                     number_of_sequences += 1
                 except IOError:
                     missing_data = True
+                    print("Some data not found!")
                 data_index += 1
     return number_of_sequences
 
