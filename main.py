@@ -1,3 +1,4 @@
+import imageio
 from math import dist
 import tensorflow as tf
 import glob
@@ -30,6 +31,13 @@ def main():
 
     training_questions = np.zeros((number_of_sequences, input_frames, image_size, image_size, 1))
     training_answers = np.zeros((number_of_sequences, frames_in_sequence, image_size, image_size, 1))
+    image_length = len(glob.glob("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/*.npy"))
+
+    images = []
+    for i in range(image_length):
+        images.append(transform_data_to_image("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/{}.npy".format(i), image_size))
+    imageio.mimsave("test.gif", images)
+
 
     test_frame = transform_data_to_image("Interpolated_simulations/sim_0_x-0_y-0_d-0.001/0.npy", image_size)
 
@@ -156,7 +164,7 @@ def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset
     for simulation in simulation_refs:
         print("Working on {}".format(simulation))
         dat_files = glob.glob("{}/*".format(simulation))
-        number_of_points = len(dat_files)
+        number_of_points = len(dat_files)-5
         try:
             os.mkdir("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}".format(
                 simulation_refs.index(simulation), x_offset, y_offset, distance
