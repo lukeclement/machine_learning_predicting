@@ -1,3 +1,4 @@
+from time import time
 import imageio
 from math import dist
 import tensorflow as tf
@@ -6,6 +7,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 
 def main():
@@ -16,7 +18,7 @@ def main():
     distance_in_interpolation = 0.001
     # interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
 
-    # Dataset creation
+    # Dataset creation for images
     image_size = 128
     input_frames = 4
     timestep = 5
@@ -38,20 +40,45 @@ def main():
     training_answers = np.zeros((
         number_of_sequences, frames_in_sequence, image_size, image_size, 1
     ))
-    image_length = len(glob.glob("Interpolated_simulations/sim_10_x-0_y-0_d-0.001/*.npy"))
 
-    images = []
-    for i in range(image_length):
-        images.append(transform_data_to_image(
-            "Interpolated_simulations/sim_10_x-0_y-0_d-0.001/{}.npy".format(i), image_size
-        ))
-    imageio.mimsave("test.gif", images)
+    print(number_of_sequences)
+    pbar = tqdm(total=number_of_sequences)
+    sequence_index = 0
+    for simulation_index in range(number_of_simulations):
+        if simulation_index not in excluded_simulations:
+            number_of_data_points = len(glob.glob(
+                "Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/*".format(
+                    simulation_index, 0, 0, distance_in_interpolation
+                )
+            ))
+            max_data_index = number_of_data_points - (maximum_sequence_number + input_frames - 1)*timestep
+            for data_index in range(max_data_index):
+                first_index = data_index
+                for frame_index in range(input_frames):
+                    data_point = first_index + frame_index * timestep
+                    filename = "Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+                        simulation_index, 0, 0, distance_in_interpolation, data_point
+                    )
+                    training_questions[
+                        sequence_index, frame_index, :, :, :
+                    ] = transform_data_to_image(filename, image_size)
 
-    test_frame = transform_data_to_image(
-        "Interpolated_simulations/sim_0_x-0_y-0_d-0.001/0.npy", image_size
-    )
-
-    plt.imshow(test_frame)
+                for next_stages in range(frames_in_sequence):
+                    data_point = first_index + (
+                        input_frames +
+                        next_stages * (maximum_sequence_number-1)//(frames_in_sequence-1)
+                    ) * timestep
+                    filename = "Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+                        simulation_index, 0, 0, distance_in_interpolation, data_point
+                    )
+                    training_answers[
+                        sequence_index, next_stages, :, :, :
+                    ] = transform_data_to_image(filename, image_size)
+                sequence_index += 1
+                pbar.update(1)
+    pbar.close()
+    
+    plt.imshow(training_answers[-1, -1, :, :, 0])
     plt.show()
     # Make neural network
 
@@ -203,13 +230,12 @@ def get_sequence_number(number_of_simulations, distance_in_interpolation, input_
             data_index = (input_frames + maximum_sequence_number - 1) * timestep
             while not missing_data:
                 try:
-                    data = np.load("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}".format(
+                    data = np.load("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
                         simulation_index, 0, 0, distance_in_interpolation, data_index
                         ))
                     number_of_sequences += 1
                 except IOError:
                     missing_data = True
-                    print("Some data not found!")
                 data_index += 1
     return number_of_sequences
 
