@@ -1,3 +1,4 @@
+from email.mime import image
 import time
 import imageio
 from math import dist
@@ -114,7 +115,7 @@ def main():
                 if i % 4 == 0:
                     print("/", end="")
                 elif i % 4 == 1:
-                    print("~", end="")
+                    print("*", end="")
                 elif i % 4 == 2:
                     print("\\", end="")
                 elif i % 4 == 3:
@@ -138,12 +139,54 @@ def main():
             print("Epoch took {:.0f} mins, {:.1f} seconds (average time per step {:.3f}s)".format(epoch_time//60, epoch_time - (epoch_time//60) * 60, np.mean(previous_times)))
         else:
             print("Epoch took {:.2f} seconds (average time per step {:.3f}s)".format(epoch_time, np.mean(previous_times)))
+        
+        start_frames = np.zeros((1, input_frames, image_size, image_size, 1))
+        
+        for frame in range(input_frames):
+            start_frames[0, frame, :, :, :] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+                0, 0, 0, distance_in_interpolation, frame * timestep
+            ), image_size)
+        
+        actual_frames = np.zeros((200, image_size, image_size, 1))
+        predicted_frames = np.zeros((200, image_size, image_size, 1))
+        for i in range(200):
+            next_frame = generator(start_frames, training=False)
+            predicted_frames[i] = next_frame[0]
+            for frame in range(input_frames-1):
+                start_frames[0, frame, :, :, :] = start_frames[0, frame + 1, :, :, :]
+            start_frames[:, input_frames-1, :, :, :] = next_frame
+            try:
+                actual_frames[i] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+                    0, 0, 0, distance_in_interpolation, (input_frames + i) * timestep
+                ), image_size)
+            except FileNotFoundError:
+                continue
+        true_y_positions = np.zeros((200, image_size))
+        predicted_y_positions = np.zeros((200, image_size))
+        for i in range(200):
+            true_y_positions[i] = calculate_com(actual_frames[i])[1]
+            predicted_y_positions[i] = calculate_com(predicted_frames[i])[1]
+        true_mean_y = np.mean(true_y_positions, axis=1)
+        predicted_mean_y = np.mean(predicted_y_positions, axis=1)
+        plt.plot(true_mean_y)
+        plt.plot(predicted_mean_y)
+        plt.show()
 
     # Look at network performance
 
     # Extract results from network
 
     return 0
+
+
+def calculate_com(bubble):
+    image_size = np.shape(bubble)[0]
+    x = np.linspace(-1, 1, image_size)
+    y = np.linspace(1, -1, image_size)
+    x, y = np.meshgrid(x, y, indexing='xy')
+    x_com = np.sum(x * bubble) / np.sum(bubble)
+    y_com = np.sum(y * bubble) / np.sum(bubble)
+    return x_com, y_com
 
 
 @tf.function
