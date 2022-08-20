@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from tensorflow.keras import layers, models, initializers, losses, optimizers, activations, metrics, Input, Model
 from tensorflow.keras import backend as k
+import os
 
 
 def main():
@@ -32,7 +33,7 @@ def main():
     # If this number is 2,
     # then the answer sequence is just the next frame and the last frame in the sequence
 
-    excluded_simulations = []
+    excluded_simulations = [0]
     number_of_sequences = get_sequence_number(number_of_simulations, distance_in_interpolation,
                                               input_frames, timestep, maximum_sequence_number,
                                               excluded_simulations)
@@ -92,9 +93,12 @@ def main():
 
     # Train network
     epochs = 50
+    line_width = os.get_terminal_size().columns
     for epoch in range(epochs):
         start_time = time.time()
         print("Epoch {}/{}:".format(epoch+1, epochs))
+        index = 0
+        previous_times = []
         for questions, answers in testing_data:
             start_step_time = time.time()
             network_loss, disc_loss, network_mse = train_image_step(
@@ -104,12 +108,36 @@ def main():
                 maximum_sequence_number, input_frames, frames_in_sequence
             )
             end_step_time = time.time()
+            index += 1
+            progress = index * batch_size / number_of_sequences
+            for i in range(int(progress * (line_width - 90))):
+                if i % 4 == 0:
+                    print("/", end="")
+                elif i % 4 == 1:
+                    print("~", end="")
+                elif i % 4 == 2:
+                    print("\\", end="")
+                elif i % 4 == 3:
+                    print("_", end="")
+            for i in range(int((1-progress) * (line_width - 90))):
+                print("-", end="")
+            number_left = number_of_sequences/batch_size - index
+            previous_times.append(end_step_time - start_step_time)
+            eta = np.mean(previous_times) * number_left
+            
+            print("| ETA: {:05.1f}s | ".format(eta), end="")
+            print("{:0>5.0f}/{:0>5.0f} ({:04.1f}%) | ".format(
+                index, number_of_sequences//batch_size, progress*100), end="")
+            print("net loss: {:0.2f} | disc loss: {:0.2f} | MSE: {:0.3f} ".format(
+                k.mean(network_loss), k.mean(disc_loss), k.mean(network_mse)*10), end="")
+            print("", end="\r")
+        print("")
         end_time = time.time()
         epoch_time = end_time - start_time
         if epoch_time > 90:
-            print("Epoch took {} mins, {:.1f} seconds".format(epoch_time//60, epoch_time - (epoch_time//60) * 60))
+            print("Epoch took {:.0f} mins, {:.1f} seconds (average time per step {:.3f}s)".format(epoch_time//60, epoch_time - (epoch_time//60) * 60, np.mean(previous_times)))
         else:
-            print("Epoch took {:.2f} seconds".format(epoch_time))
+            print("Epoch took {:.2f} seconds (average time per step {:.3f}s)".format(epoch_time, np.mean(previous_times)))
 
     # Look at network performance
 
