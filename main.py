@@ -8,7 +8,8 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-
+from tensorflow.keras import layers, models, initializers, losses, optimizers, activations, metrics, Input, Model
+from tensorflow.keras import backend as k
 
 def main():
     raw_simulations = glob.glob("Simulations/*")
@@ -19,6 +20,7 @@ def main():
     # interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
 
     # Dataset creation for images
+    batch_size = 64
     image_size = 128
     input_frames = 4
     timestep = 5
@@ -77,10 +79,15 @@ def main():
                 sequence_index += 1
                 pbar.update(1)
     pbar.close()
-    
-    plt.imshow(training_answers[-1, -1, :, :, 0])
-    plt.show()
+
+    testing_data = tf.data.Dataset.from_tensor_slices((training_questions, training_answers))
+    testing_data = testing_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     # Make neural network
+    generator = create_basic_network(layers.LeakyReLU(), input_frames, image_size, channels=1)
+    discriminator = create_discriminator(input_frames, image_size)
+    lr_schedule = LearningRateStep(1e-3)
+    generator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
+    discriminator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
 
     # Train network
 
@@ -89,6 +96,82 @@ def main():
     # Extract results from network
 
     return 0
+
+
+class LearningRateStep(optimizers.schedules.LearningRateSchedule):
+    def __init__(self, i_lr):
+        self.initial_learning_rate = i_lr
+
+    def __call__(self, step):
+        epoch = step//1296
+        return self.initial_learning_rate * 0.1 ** (epoch//20)
+
+
+def create_basic_network(activation, input_frames, image_size, channels=3, latent_dimensions=100, start_channels=32):
+    input_layer = layers.Input(shape=(input_frames, image_size, image_size, channels))
+    layer_depth = -1
+    frames = input_frames
+    size = image_size
+    x = input_layer
+    frames_ran = False
+    while max(frames, 1) * size * size > latent_dimensions:
+        layer_depth += 1
+        if frames > 1:
+            x = layers.Conv3D(start_channels*2**layer_depth, 5, strides=2, padding='same')(x)
+            x = activation(x)
+            frames = frames // 2
+            size = size // 2
+            frames_ran = True
+        else:
+            if frames == 1:
+                if frames_ran:
+                    x = layers.Reshape((size, size, int(start_channels*2**(layer_depth-1))))(x)
+                else:
+                    x = layers.Reshape((size, size, channels))(x)
+                frames = 0
+            x = layers.Conv2D(start_channels*2**layer_depth, 5, strides=2, padding='same', use_bias=False)(x)
+            x = layers.BatchNormalization()(x)
+            x = activation(x)
+            size = size // 2
+
+    # x = layers.Flatten()(x)
+    # x = layers.Dense(8 * 8 * 32 * 2**layer_depth)(x)
+    # x = layers.BatchNormalization()(x)
+    # x = activation(x)
+    # x = layers.Reshape((8, 8, 32 * 2**layer_depth))(x)
+    while size != image_size:
+        layer_depth -= 1
+        x = layers.Conv2DTranspose(start_channels*2**layer_depth, 5, strides=2, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = activation(x)
+        size = size * 2
+
+    x = layers.Conv2DTranspose(1, 5, activation='sigmoid', padding='same', use_bias=False)(x)
+
+    model = Model(input_layer, x)
+    return model
+
+
+def create_discriminator(input_frames, input_size):
+    input_layer = Input(shape=(input_frames, input_size, input_size, 1))
+    x = layers.Conv3D(32, 3, strides=2, padding='same')(input_layer)
+    x = layers.LeakyReLU()(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Conv3D(64, 3, strides=2, padding='same')(x)
+    x = layers.LeakyReLU()(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Conv3D(128, 3, strides=2, padding='same')(x)
+    x = layers.LeakyReLU()(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Flatten()(x)
+    x = layers.Dense(1, activation='sigmoid')(x)
+    x = layers.Activation('sigmoid', dtype='float32')(x)
+
+    model = Model(input_layer, x, name='discriminator')
+    return model
 
 
 def verify_data(simulation_refs):
