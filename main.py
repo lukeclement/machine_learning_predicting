@@ -1,4 +1,4 @@
-from time import time
+import time
 import imageio
 from math import dist
 import tensorflow as tf
@@ -11,6 +11,7 @@ import matplotlib.cm as cm
 from tensorflow.keras import layers, models, initializers, losses, optimizers, activations, metrics, Input, Model
 from tensorflow.keras import backend as k
 
+
 def main():
     raw_simulations = glob.glob("Simulations/*")
     number_of_simulations = len(raw_simulations)
@@ -20,7 +21,7 @@ def main():
     # interpolate_simulations(raw_simulations, distance=distance_in_interpolation)
 
     # Dataset creation for images
-    batch_size = 64
+    batch_size = 8
     image_size = 128
     input_frames = 4
     timestep = 5
@@ -38,10 +39,10 @@ def main():
 
     training_questions = np.zeros((
         number_of_sequences, input_frames, image_size, image_size, 1
-    ))
+    ), dtype=np.float32)
     training_answers = np.zeros((
         number_of_sequences, frames_in_sequence, image_size, image_size, 1
-    ))
+    ), dtype=np.float32)
 
     print(number_of_sequences)
     pbar = tqdm(total=number_of_sequences)
@@ -84,18 +85,82 @@ def main():
     testing_data = testing_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     # Make neural network
     generator = create_basic_network(layers.LeakyReLU(), input_frames, image_size, channels=1)
-    discriminator = create_discriminator(input_frames, image_size)
+    discriminator = create_discriminator(frames_in_sequence, image_size)
     lr_schedule = LearningRateStep(1e-3)
     generator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
     discriminator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
 
     # Train network
+    epochs = 50
+    for epoch in range(epochs):
+        start_time = time.time()
+        print("Epoch {}/{}:".format(epoch+1, epochs))
+        for questions, answers in testing_data:
+            start_step_time = time.time()
+            network_loss, disc_loss, network_mse = train_image_step(
+                questions, answers,
+                generator, discriminator,
+                generator_optimizer, discriminator_optimizer,
+                maximum_sequence_number, input_frames, frames_in_sequence
+            )
+            end_step_time = time.time()
+        end_time = time.time()
+        epoch_time = end_time - start_time
+        if epoch_time > 90:
+            print("Epoch took {} mins, {:.1f} seconds".format(epoch_time//60, epoch_time - (epoch_time//60) * 60))
+        else:
+            print("Epoch took {:.2f} seconds".format(epoch_time))
 
     # Look at network performance
 
     # Extract results from network
 
     return 0
+
+
+@tf.function
+def train_image_step(input_images, expected_output, network, discriminator, net_op, disc_op, future_runs, frames, num_points):
+    with tf.GradientTape() as net_tape, tf.GradientTape() as disc_tape:
+        current_output = []
+        future_input = input_images
+        predictions = network(input_images, training=True)
+
+        for future_step in range(((future_runs-1)//(num_points-1))*(num_points-1)):
+            if future_step % ((future_runs-1)//(num_points-1)) == 0:
+                current_output.append(predictions)
+            next_input = []
+            for i in range(frames - 1):
+                next_input.append(future_input[:, i + 1])
+            next_input.append(predictions)
+            future_input = tf.stack(next_input, axis=1)
+            predictions = network(future_input, training=True)
+
+        current_output.append(predictions)
+
+        overall_predictions = tf.stack(current_output, axis=1)
+        real_output = discriminator(expected_output, training=True)
+        actual_output = discriminator(overall_predictions, training=True)
+        network_disc_loss = generator_loss(actual_output)
+        network_mse = k.mean(losses.mean_squared_error(expected_output, overall_predictions), axis=0)
+        disc_loss = discriminator_loss(real_output, actual_output)
+        network_loss = network_disc_loss + network_mse
+
+    net_grad = net_tape.gradient(network_loss, network.trainable_variables)
+    disc_grad = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
+    net_op.apply_gradients(zip(net_grad, network.trainable_variables))
+    disc_op.apply_gradients(zip(disc_grad, discriminator.trainable_variables))
+
+    return network_loss, disc_loss, network_mse
+
+
+def discriminator_loss(real, fake):
+    real_loss = losses.BinaryCrossentropy()(tf.ones_like(real), real)
+    fake_loss = losses.BinaryCrossentropy()(tf.zeros_like(fake), fake)
+    return real_loss + fake_loss
+
+
+def generator_loss(fake):
+    return losses.BinaryCrossentropy()(tf.ones_like(fake), fake)
 
 
 class LearningRateStep(optimizers.schedules.LearningRateSchedule):
