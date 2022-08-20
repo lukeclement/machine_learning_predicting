@@ -27,7 +27,6 @@ def main():
     image_size = 128
     input_frames = 4
     timestep = 5
-
     maximum_sequence_number = 10  # How far in the sequence to look for training
     frames_in_sequence = 2  # Number of frames in the answer sequence
     # This number must be greater than 1
@@ -139,7 +138,8 @@ def main():
             print("Epoch took {:.0f} mins, {:.1f} seconds (average time per step {:.3f}s)".format(epoch_time//60, epoch_time - (epoch_time//60) * 60, np.mean(previous_times)))
         else:
             print("Epoch took {:.2f} seconds (average time per step {:.3f}s)".format(epoch_time, np.mean(previous_times)))
-        
+        time_left = epoch_time * (epochs - epoch)
+        print("Estimated time remaining is {:.0f} minutes, {:.1f} seconds".format(time_left//60, time_left - (time_left//60) * 60))
         start_frames = np.zeros((1, input_frames, image_size, image_size, 1))
         
         for frame in range(input_frames):
@@ -164,13 +164,17 @@ def main():
         true_y_positions = np.zeros((200, image_size))
         predicted_y_positions = np.zeros((200, image_size))
         for i in range(200):
-            true_y_positions[i] = calculate_com(actual_frames[i])[1]
-            predicted_y_positions[i] = calculate_com(predicted_frames[i])[1]
+            true_y_positions[i] = calculate_com(actual_frames[i, :, :, 0])[1]
+            predicted_y_positions[i] = calculate_com(predicted_frames[i, :, :, 0])[1]
         true_mean_y = np.mean(true_y_positions, axis=1)
         predicted_mean_y = np.mean(predicted_y_positions, axis=1)
-        plt.plot(true_mean_y)
-        plt.plot(predicted_mean_y)
-        plt.show()
+        plt.plot(true_mean_y, label="True")
+        plt.plot(predicted_mean_y, label="False")
+        plt.legend()
+        plt.ylim((-0.4, 0.4))
+        plt.grid()
+        plt.savefig("model_training/model_{}.png".format(epoch), dpi=500)
+        plt.clf()
 
     # Look at network performance
 
@@ -182,7 +186,7 @@ def main():
 def calculate_com(bubble):
     image_size = np.shape(bubble)[0]
     x = np.linspace(-1, 1, image_size)
-    y = np.linspace(1, -1, image_size)
+    y = np.linspace(-1, 1, image_size)
     x, y = np.meshgrid(x, y, indexing='xy')
     x_com = np.sum(x * bubble) / np.sum(bubble)
     y_com = np.sum(y * bubble) / np.sum(bubble)
@@ -459,7 +463,7 @@ def get_sequence_number(number_of_simulations, distance_in_interpolation, input_
     return number_of_sequences
 
 
-def transform_data_to_image(file_name, image_size, modifier=15):
+def transform_data_to_image(file_name, image_size, modifier=10):
     x, y = np.load(file_name)
     h, x_edge, y_edge = np.histogram2d(
         x, y,
