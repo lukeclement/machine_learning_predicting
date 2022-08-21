@@ -92,7 +92,7 @@ def main():
     discriminator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
 
     # Train network
-    epochs = 50
+    epochs = 20
     line_width = os.get_terminal_size().columns
     for epoch in range(epochs):
         start_time = time.time()
@@ -176,6 +176,7 @@ def main():
         plt.savefig("model_training/model_{}.png".format(epoch), dpi=500)
         plt.clf()
 
+    generator.save("models/first")
     # Look at network performance
 
     # Extract results from network
