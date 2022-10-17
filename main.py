@@ -27,13 +27,16 @@ def main():
     image_size = 128
     input_frames = 4
     timestep = 5
-    maximum_sequence_number = 10  # How far in the sequence to look for training
-    frames_in_sequence = 2  # Number of frames in the answer sequence
+    epochs = 20
+    maximum_sequence_number = 20  # How far in the sequence to look for training
+    frames_in_sequence = 3  # Number of frames in the answer sequence
     # This number must be greater than 1
     # If this number is 2,
     # then the answer sequence is just the next frame and the last frame in the sequence
 
+    name = "first"
     excluded_simulations = [0]
+
     number_of_sequences = get_sequence_number(number_of_simulations, distance_in_interpolation,
                                               input_frames, timestep, maximum_sequence_number,
                                               excluded_simulations)
@@ -55,7 +58,8 @@ def main():
                     simulation_index, 0, 0, distance_in_interpolation
                 )
             ))
-            max_data_index = number_of_data_points - (maximum_sequence_number + input_frames - 1)*timestep
+            max_data_index = number_of_data_points - \
+                (maximum_sequence_number + input_frames - 1)*timestep
             for data_index in range(max_data_index):
                 first_index = data_index
                 for frame_index in range(input_frames):
@@ -70,7 +74,8 @@ def main():
                 for next_stages in range(frames_in_sequence):
                     data_point = first_index + (
                         input_frames +
-                        next_stages * (maximum_sequence_number-1)//(frames_in_sequence-1)
+                        next_stages * (maximum_sequence_number -
+                                       1)//(frames_in_sequence-1)
                     ) * timestep
                     filename = "Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
                         simulation_index, 0, 0, distance_in_interpolation, data_point
@@ -82,21 +87,44 @@ def main():
                 pbar.update(1)
     pbar.close()
 
-    testing_data = tf.data.Dataset.from_tensor_slices((training_questions, training_answers))
+    testing_data = tf.data.Dataset.from_tensor_slices(
+        (training_questions, training_answers))
     testing_data = testing_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     # Make neural network
-    generator = create_basic_network(layers.LeakyReLU(), input_frames, image_size, channels=1)
+    generator = create_basic_network(
+        layers.LeakyReLU(), input_frames, image_size, channels=1)
+    print(generator.summary())
     discriminator = create_discriminator(frames_in_sequence, image_size)
     lr_schedule = LearningRateStep(1e-3)
-    generator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
-    discriminator_optimizer = optimizers.Adam(learning_rate=lr_schedule, epsilon=0.1)
+    generator_optimizer = optimizers.Adam(
+        learning_rate=lr_schedule, epsilon=0.1)
+    discriminator_optimizer = optimizers.Adam(
+        learning_rate=lr_schedule, epsilon=0.1)
 
     # Train network
-    epochs = 20
+    train_image_network(epochs, testing_data,
+                        generator, discriminator, generator_optimizer, discriminator_optimizer,
+                        maximum_sequence_number, input_frames, frames_in_sequence,
+                        batch_size, number_of_sequences,
+                        image_size, distance_in_interpolation, timestep, excluded_simulations, name)
+    generator = models.load_model("models/{}".format(name))
+    # Look at network performance
+
+    # Extract results from network
+
+    return 0
+
+
+def train_image_network(epochs, testing_data,
+                        generator, discriminator, generator_optimizer, discriminator_optimizer,
+                        maximum_sequence_number, input_frames, frames_in_sequence,
+                        batch_size, number_of_sequences,
+                        image_size, distance_in_interpolation, timestep,
+                        excluded_simulations, name):
     line_width = os.get_terminal_size().columns
     for epoch in range(epochs):
         start_time = time.time()
-        print("Epoch {}/{}:".format(epoch+1, epochs))
+        print("Epoch {}/{}:".format(epoch, epochs-1))
         index = 0
         previous_times = []
         for questions, answers in testing_data:
@@ -109,55 +137,37 @@ def main():
             )
             end_step_time = time.time()
             index += 1
-            progress = index * batch_size / number_of_sequences
-            for i in range(int(progress * (line_width - 90))):
-                if i % 4 == 0:
-                    print("/", end="")
-                elif i % 4 == 1:
-                    print("*", end="")
-                elif i % 4 == 2:
-                    print("\\", end="")
-                elif i % 4 == 3:
-                    print("_", end="")
-            for i in range(int((1-progress) * (line_width - 90))):
-                print("-", end="")
-            number_left = number_of_sequences/batch_size - index
-            previous_times.append(end_step_time - start_step_time)
-            eta = np.mean(previous_times) * number_left
-            
-            print("| ETA: {:05.1f}s | ".format(eta), end="")
-            print("{:0>5.0f}/{:0>5.0f} ({:04.1f}%) | ".format(
-                index, number_of_sequences//batch_size, progress*100), end="")
-            print("net loss: {:0.2f} | disc loss: {:0.2f} | MSE: {:0.3f} ".format(
-                k.mean(network_loss), k.mean(disc_loss), k.mean(network_mse)*10), end="")
-            print("", end="\r")
+            progess_bar(
+                batch_size, number_of_sequences,
+                line_width, index, previous_times,
+                start_step_time, network_loss, disc_loss,
+                network_mse, end_step_time
+                )
         print("")
         end_time = time.time()
-        epoch_time = end_time - start_time
-        if epoch_time > 90:
-            print("Epoch took {:.0f} mins, {:.1f} seconds (average time per step {:.3f}s)".format(epoch_time//60, epoch_time - (epoch_time//60) * 60, np.mean(previous_times)))
-        else:
-            print("Epoch took {:.2f} seconds (average time per step {:.3f}s)".format(epoch_time, np.mean(previous_times)))
-        time_left = epoch_time * (epochs - epoch)
-        print("Estimated time remaining is {:.0f} minutes, {:.1f} seconds".format(time_left//60, time_left - (time_left//60) * 60))
+        epoch_eta(epochs, epoch, start_time, previous_times, end_time)
+
         start_frames = np.zeros((1, input_frames, image_size, image_size, 1))
-        
+
+        reference_sim = excluded_simulations[0]
         for frame in range(input_frames):
             start_frames[0, frame, :, :, :] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
-                0, 0, 0, distance_in_interpolation, frame * timestep
+                reference_sim, 0, 0, distance_in_interpolation, frame * timestep
             ), image_size)
-        
+
         actual_frames = np.zeros((200, image_size, image_size, 1))
         predicted_frames = np.zeros((200, image_size, image_size, 1))
         for i in range(200):
             next_frame = generator(start_frames, training=False)
             predicted_frames[i] = next_frame[0]
             for frame in range(input_frames-1):
-                start_frames[0, frame, :, :, :] = start_frames[0, frame + 1, :, :, :]
+                start_frames[0, frame, :, :,
+                             :] = start_frames[0, frame + 1, :, :, :]
             start_frames[:, input_frames-1, :, :, :] = next_frame
             try:
                 actual_frames[i] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
-                    0, 0, 0, distance_in_interpolation, (input_frames + i) * timestep
+                    reference_sim, 0, 0, distance_in_interpolation, (
+                        input_frames + i) * timestep
                 ), image_size)
             except FileNotFoundError:
                 continue
@@ -165,7 +175,8 @@ def main():
         predicted_y_positions = np.zeros((200, image_size))
         for i in range(200):
             true_y_positions[i] = calculate_com(actual_frames[i, :, :, 0])[1]
-            predicted_y_positions[i] = calculate_com(predicted_frames[i, :, :, 0])[1]
+            predicted_y_positions[i] = calculate_com(
+                predicted_frames[i, :, :, 0])[1]
         true_mean_y = np.mean(true_y_positions, axis=1)
         predicted_mean_y = np.mean(predicted_y_positions, axis=1)
         plt.plot(true_mean_y, label="True")
@@ -173,15 +184,48 @@ def main():
         plt.legend()
         plt.ylim((-0.4, 0.4))
         plt.grid()
-        plt.savefig("model_training/model_{}.png".format(epoch), dpi=500)
+        plt.savefig("model_training/model_{}_{}.png".format(name, epoch), dpi=500)
         plt.clf()
 
-    generator.save("models/first")
-    # Look at network performance
+    generator.save("models/{}".format(name))
 
-    # Extract results from network
 
-    return 0
+def epoch_eta(epochs, epoch, start_time, previous_times, end_time):
+    epoch_time = end_time - start_time
+    if epoch_time > 90:
+        print("Epoch {:.0f} took {:.0f} mins, {:.1f} seconds (average time per step {:.3f}s)".format(
+                epoch, epoch_time//60, epoch_time - (epoch_time//60) * 60, np.mean(previous_times)))
+    else:
+        print("Epoch took {:.2f} seconds (average time per step {:.3f}s)".format(
+                epoch_time, np.mean(previous_times)))
+    time_left = epoch_time * (epochs - epoch)
+    print("Estimated time remaining is {:.0f} minutes, {:.1f} seconds".format(
+            time_left//60, time_left - (time_left//60) * 60))
+
+
+def progess_bar(batch_size, number_of_sequences, line_width, index, previous_times, start_step_time, network_loss, disc_loss, network_mse, end_step_time):
+    progress = index * batch_size / number_of_sequences
+    for i in range(int(progress * (line_width - 90))):
+        if i % 4 == 0:
+            print("/", end="")
+        elif i % 4 == 1:
+            print("*", end="")
+        elif i % 4 == 2:
+            print("\\", end="")
+        elif i % 4 == 3:
+            print("_", end="")
+    for i in range(int((1-progress) * (line_width - 90))):
+        print("-", end="")
+    number_left = number_of_sequences/batch_size - index
+    previous_times.append(end_step_time - start_step_time)
+    eta = np.mean(previous_times) * number_left
+
+    print("| ETA: {:05.1f}s | ".format(eta), end="")
+    print("{:0>5.0f}/{:0>5.0f} ({:04.1f}%) | ".format(
+                index, number_of_sequences//batch_size, progress*100), end="")
+    print("net loss: {:0.2f} | disc loss: {:0.2f} | MSE: {:0.3f} ".format(
+                k.mean(network_loss), k.mean(disc_loss), k.mean(network_mse)*10), end="")
+    print("", end="\r")
 
 
 def calculate_com(bubble):
@@ -217,12 +261,14 @@ def train_image_step(input_images, expected_output, network, discriminator, net_
         real_output = discriminator(expected_output, training=True)
         actual_output = discriminator(overall_predictions, training=True)
         network_disc_loss = generator_loss(actual_output)
-        network_mse = k.mean(losses.mean_squared_error(expected_output, overall_predictions), axis=0)
+        network_mse = k.mean(losses.mean_squared_error(
+            expected_output, overall_predictions), axis=0)
         disc_loss = discriminator_loss(real_output, actual_output)
         network_loss = network_disc_loss + network_mse
 
     net_grad = net_tape.gradient(network_loss, network.trainable_variables)
-    disc_grad = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
+    disc_grad = disc_tape.gradient(
+        disc_loss, discriminator.trainable_variables)
     net_op.apply_gradients(zip(net_grad, network.trainable_variables))
     disc_op.apply_gradients(zip(disc_grad, discriminator.trainable_variables))
 
@@ -249,7 +295,8 @@ class LearningRateStep(optimizers.schedules.LearningRateSchedule):
 
 
 def create_basic_network(activation, input_frames, image_size, channels=3, latent_dimensions=100, start_channels=32):
-    input_layer = layers.Input(shape=(input_frames, image_size, image_size, channels))
+    input_layer = layers.Input(
+        shape=(input_frames, image_size, image_size, channels))
     layer_depth = -1
     frames = input_frames
     size = image_size
@@ -258,7 +305,8 @@ def create_basic_network(activation, input_frames, image_size, channels=3, laten
     while max(frames, 1) * size * size > latent_dimensions:
         layer_depth += 1
         if frames > 1:
-            x = layers.Conv3D(start_channels*2**layer_depth, 5, strides=2, padding='same')(x)
+            x = layers.Conv3D(start_channels*2**layer_depth,
+                              5, strides=2, padding='same')(x)
             x = activation(x)
             frames = frames // 2
             size = size // 2
@@ -266,11 +314,13 @@ def create_basic_network(activation, input_frames, image_size, channels=3, laten
         else:
             if frames == 1:
                 if frames_ran:
-                    x = layers.Reshape((size, size, int(start_channels*2**(layer_depth-1))))(x)
+                    x = layers.Reshape(
+                        (size, size, int(start_channels*2**(layer_depth-1))))(x)
                 else:
                     x = layers.Reshape((size, size, channels))(x)
                 frames = 0
-            x = layers.Conv2D(start_channels*2**layer_depth, 5, strides=2, padding='same', use_bias=False)(x)
+            x = layers.Conv2D(start_channels*2**layer_depth,
+                              5, strides=2, padding='same', use_bias=False)(x)
             x = layers.BatchNormalization()(x)
             x = activation(x)
             size = size // 2
@@ -282,12 +332,14 @@ def create_basic_network(activation, input_frames, image_size, channels=3, laten
     # x = layers.Reshape((8, 8, 32 * 2**layer_depth))(x)
     while size != image_size:
         layer_depth -= 1
-        x = layers.Conv2DTranspose(start_channels*2**layer_depth, 5, strides=2, padding='same', use_bias=False)(x)
+        x = layers.Conv2DTranspose(
+            start_channels*2**layer_depth, 5, strides=2, padding='same', use_bias=False)(x)
         x = layers.BatchNormalization()(x)
         x = activation(x)
         size = size * 2
 
-    x = layers.Conv2DTranspose(1, 5, activation='sigmoid', padding='same', use_bias=False)(x)
+    x = layers.Conv2DTranspose(
+        1, 5, activation='sigmoid', padding='same', use_bias=False)(x)
 
     model = Model(input_layer, x)
     return model
@@ -438,7 +490,8 @@ def interpolate_simulations(simulation_refs, distance=0.01, x_offset=0, y_offset
             x, y = make_lines(x, y, distance)
             data = np.array([x + x_offset, y + y_offset])
             np.save("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}".format(
-                simulation_refs.index(simulation), x_offset, y_offset, distance, i-3
+                simulation_refs.index(
+                    simulation), x_offset, y_offset, distance, i-3
             ), data)
             bar.update(1)
         bar.close()
@@ -451,12 +504,13 @@ def get_sequence_number(number_of_simulations, distance_in_interpolation, input_
     for simulation_index in range(number_of_simulations):
         if simulation_index not in excluded_simulations:
             missing_data = False
-            data_index = (input_frames + maximum_sequence_number - 1) * timestep
+            data_index = (
+                input_frames + maximum_sequence_number - 1) * timestep
             while not missing_data:
                 try:
                     data = np.load("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
                         simulation_index, 0, 0, distance_in_interpolation, data_index
-                        ))
+                    ))
                     number_of_sequences += 1
                 except IOError:
                     missing_data = True
