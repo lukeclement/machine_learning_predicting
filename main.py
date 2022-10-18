@@ -147,47 +147,50 @@ def train_image_network(epochs, testing_data,
         end_time = time.time()
         epoch_eta(epochs, epoch, start_time, previous_times, end_time)
 
-        start_frames = np.zeros((1, input_frames, image_size, image_size, 1))
+        evaluate_network(generator, input_frames, image_size, distance_in_interpolation, timestep, excluded_simulations, name, epoch)
 
-        reference_sim = excluded_simulations[0]
-        for frame in range(input_frames):
-            start_frames[0, frame, :, :, :] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+    generator.save("models/{}".format(name))
+
+
+def evaluate_network(generator, input_frames, image_size, distance_in_interpolation, timestep, excluded_simulations, name, epoch):
+    start_frames = np.zeros((1, input_frames, image_size, image_size, 1))
+
+    reference_sim = excluded_simulations[0]
+    for frame in range(input_frames):
+        start_frames[0, frame, :, :, :] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
                 reference_sim, 0, 0, distance_in_interpolation, frame * timestep
             ), image_size)
 
-        actual_frames = np.zeros((200, image_size, image_size, 1))
-        predicted_frames = np.zeros((200, image_size, image_size, 1))
-        for i in range(200):
-            next_frame = generator(start_frames, training=False)
-            predicted_frames[i] = next_frame[0]
-            for frame in range(input_frames-1):
-                start_frames[0, frame, :, :,
-                             :] = start_frames[0, frame + 1, :, :, :]
-            start_frames[:, input_frames-1, :, :, :] = next_frame
-            try:
-                actual_frames[i] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
+    actual_frames = np.zeros((200, image_size, image_size, 1))
+    predicted_frames = np.zeros((200, image_size, image_size, 1))
+    for i in range(200):
+        next_frame = generator(start_frames, training=False)
+        predicted_frames[i] = next_frame[0]
+        for frame in range(input_frames-1):
+            start_frames[0, frame, :, :, :] = start_frames[0, frame + 1, :, :, :]
+        start_frames[:, input_frames-1, :, :, :] = next_frame
+        try:
+            actual_frames[i] = transform_data_to_image("Interpolated_simulations/sim_{}_x-{}_y-{}_d-{}/{}.npy".format(
                     reference_sim, 0, 0, distance_in_interpolation, (
                         input_frames + i) * timestep
                 ), image_size)
-            except FileNotFoundError:
-                continue
-        true_y_positions = np.zeros((200, image_size))
-        predicted_y_positions = np.zeros((200, image_size))
-        for i in range(200):
-            true_y_positions[i] = calculate_com(actual_frames[i, :, :, 0])[1]
-            predicted_y_positions[i] = calculate_com(
+        except FileNotFoundError:
+            continue
+    true_y_positions = np.zeros((200, image_size))
+    predicted_y_positions = np.zeros((200, image_size))
+    for i in range(200):
+        true_y_positions[i] = calculate_com(actual_frames[i, :, :, 0])[1]
+        predicted_y_positions[i] = calculate_com(
                 predicted_frames[i, :, :, 0])[1]
-        true_mean_y = np.mean(true_y_positions, axis=1)
-        predicted_mean_y = np.mean(predicted_y_positions, axis=1)
-        plt.plot(true_mean_y, label="True")
-        plt.plot(predicted_mean_y, label="False")
-        plt.legend()
-        plt.ylim((-0.4, 0.4))
-        plt.grid()
-        plt.savefig("model_training/model_{}_{}.png".format(name, epoch), dpi=500)
-        plt.clf()
-
-    generator.save("models/{}".format(name))
+    true_mean_y = np.mean(true_y_positions, axis=1)
+    predicted_mean_y = np.mean(predicted_y_positions, axis=1)
+    plt.plot(true_mean_y, label="True")
+    plt.plot(predicted_mean_y, label="False")
+    plt.legend()
+    plt.ylim((-0.4, 0.4))
+    plt.grid()
+    plt.savefig("model_training/model_{}_{}.png".format(name, epoch), dpi=500)
+    plt.clf()
 
 
 def epoch_eta(epochs, epoch, start_time, previous_times, end_time):
